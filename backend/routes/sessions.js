@@ -43,7 +43,7 @@ router.post('/start', requireTeacher, async (req, res) => {
 
     await client.query('COMMIT');
 
-    if (req.io) req.io.to(`teacher_${teacherId}`).emit('session_started', { session, deepLinkUrl });
+
     res.json({ message: 'Session started successfully', session, deepLinkUrl });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -72,9 +72,7 @@ router.post('/extend', requireTeacher, async (req, res) => {
     const newExpiresAt = new Date(new Date(session.expires_at).getTime() + 30 * 1000);
     await pool.query('UPDATE sessions SET expires_at = $1 WHERE id = $2', [newExpiresAt, session_id]);
 
-    if (req.io) {
-      req.io.to(`teacher_${req.user.id}`).emit('session_extended', { newExpiresAt: newExpiresAt.toISOString() });
-    }
+
     res.json({ message: 'Session extended by 30 seconds', newExpiresAt: newExpiresAt.toISOString() });
   } catch (err) {
     console.error(err);

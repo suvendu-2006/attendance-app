@@ -184,16 +184,6 @@ router.post('/check-in', requireStudent, deviceMiddleware, async (req, res) => {
       client.release();
     }
 
-    if (req.io) {
-      try {
-        const { rows: namedRows } = await pool.query('SELECT name FROM students WHERE id = $1', [student_id]);
-        const name = namedRows[0]?.name || 'Unknown Student';
-        req.io.to(`teacher_${session.teacher_id}`).emit('attendance_recorded', { student_id, name });
-      } catch (e) {
-        console.error('Realtime notify failed:', e.message);
-      }
-    }
-
     await maybeFlagAnomaly(student_id, session_id, lat, lng, ipAddress);
     res.json({ message: 'Attendance marked successfully!', status: 'PRESENT' });
   } catch (err) {

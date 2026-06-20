@@ -1,6 +1,5 @@
 const express = require('express');
 const http = require('http');
-const { Server } = require('socket.io');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
@@ -18,7 +17,6 @@ const attendanceRoutes = require('./routes/attendance');
 const overridesRoutes = require('./routes/overrides');
 
 const app = express();
-const server = http.createServer(app);
 
 // (Fix 5) Trust proxy so req.ip reflects the real client behind nginx/Cloud Run
 app.set('trust proxy', process.env.TRUST_PROXY !== undefined
@@ -40,7 +38,7 @@ app.use(helmet({
       scriptSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:"],
-      connectSrc: ["'self'", process.env.FRONTEND_URL, "ws:", "wss:"].filter(Boolean),
+      connectSrc: ["'self'", process.env.FRONTEND_URL].filter(Boolean),
     },
   },
 }));
@@ -119,13 +117,6 @@ app.use('/api/auth/teacher/login', authLimiter);
 app.use('/api/auth/student/register-device', registerDeviceLimiter);
 app.use('/api/attendance/check-in', checkInLimiter);
 
-const io = new Server(server, { cors: corsOptions });
-
-app.use((req, res, next) => {
-  req.io = io;
-  next();
-});
-
 app.use('/api/auth', authRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/attendance', attendanceRoutes);
@@ -141,39 +132,6 @@ const healthHandler = async (req, res) => {
 };
 app.get('/health', healthHandler);
 app.get('/api/health', healthHandler);
-
-io.use((socket, next) => {
-  let token = socket.handshake.auth?.token;
-  if (!token && socket.handshake.headers.cookie) {
-    const cookies = cookie.parse(socket.handshake.headers.cookie);
-    // Check role-specific cookie names (Fix 2), then legacy auth_token
-    token = cookies.teacher_auth_token || cookies.student_auth_token || cookies.auth_token;
-  }
-  if (!token) return next(new Error('Authentication required'));
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
-    socket.user = decoded;
-    next();
-  } catch {
-    next(new Error('Invalid token'));
-  }
-});
-
-io.on('connection', (socket) => {
-  console.log('A user connected:', socket.id);
-
-  socket.on('join_teacher_room', (clientTeacherId) => {
-    if (socket.user?.role !== 'teacher') return;
-    if (String(clientTeacherId) === String(socket.user.id)) {
-      socket.join(`teacher_${socket.user.id}`);
-      console.log(`Teacher joined room: teacher_${socket.user.id}`);
-    } else {
-      console.warn(`Refused cross-teacher room join by ${socket.user.id} -> ${clientTeacherId}`);
-    }
-  });
-
-  socket.on('disconnect', () => console.log('User disconnected:', socket.id));
-});
 
 setInterval(async () => {
   try {
@@ -210,19 +168,27 @@ setInterval(async () => {
 }, 30 * 60 * 1000);
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
 
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received. Shutting down gracefully...');
-  server.close(() => {
-    pool.end().then(() => {
-      console.log('Database pool closed.');
-      process.exit(0);
+if (process.env.VERCEL) {
+  // Export the Express API for Vercel Serverless
+  module.exports = app;
+} else {
+  // Standalone server for local development
+  const server = http.createServer(app);
+  server.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
+
+  process.on('SIGTERM', () => {
+    console.log('SIGTERM received. Shutting down gracefully...');
+    server.close(() => {
+      pool.end().then(() => {
+        console.log('Database pool closed.');
+        process.exit(0);
+      });
     });
+    setTimeout(() => {
+      console.error('Forced shutdown after timeout');
+      process.exit(1);
+    }, 10000);
   });
-  setTimeout(() => {
-    console.error('Forced shutdown after timeout');
-    process.exit(1);
-  }, 10000);
-});
-process.on('SIGINT', () => process.emit('SIGTERM'));
+  process.on('SIGINT', () => process.emit('SIGTERM'));
+}

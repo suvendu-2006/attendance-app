@@ -5,14 +5,7 @@ const { requireTeacher, requireStudent } = require('../middleware/auth');
 const router = express.Router();
 
 async function notifyAttendance(req, teacherId, studentId) {
-  if (!req.io) return;
-  try {
-    const { rows } = await pool.query('SELECT name FROM students WHERE id = $1', [studentId]);
-    const name = rows[0]?.name || 'Unknown Student';
-    req.io.to(`teacher_${teacherId}`).emit('attendance_recorded', { student_id: studentId, name });
-  } catch (e) {
-    console.error('Realtime notify failed:', e.message);
-  }
+  // Socket removed for Vercel
 }
 
 router.post('/guest-request', requireStudent, async (req, res) => {
@@ -39,7 +32,7 @@ router.post('/guest-request', requireStudent, async (req, res) => {
       [student_id, session_id]
     );
 
-    if (req.io) req.io.to(`teacher_${session.teacher_id}`).emit('guest_request_received', { student_id });
+
     res.json({ message: 'Guest request sent to teacher.' });
   } catch (err) {
     console.error(err);

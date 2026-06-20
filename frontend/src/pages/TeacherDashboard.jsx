@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { io } from 'socket.io-client';
 import { Play, Share2, Clock, CheckCircle2, LogOut, Copy, Trash2, Users, ShieldAlert } from 'lucide-react';
 import { BACKEND_URL, apiFetch, storage } from '../utils/api';
 
@@ -13,7 +12,6 @@ const TeacherDashboard = () => {
   const [isAdmin, setIsAdmin] = useState(false);
   const [allStudents, setAllStudents] = useState([]);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
-  const socketRef = useRef(null);
   const navigate = useNavigate();
 
   const teacherId = storage.getTeacherId();
@@ -115,55 +113,33 @@ const TeacherDashboard = () => {
     fetchActiveSession();
   }, []);
 
-  // Connect Socket.io with HTTP-only cookies cross-origin
+  // HTTP Polling for Live Updates (Replaces WebSockets for Vercel)
   useEffect(() => {
     if (!storage.getTeacherToken()) return;
 
-    const newSocket = io(BACKEND_URL, {
-      withCredentials: true
-    });
+    const pollSession = async () => {
+      try {
+        const response = await apiFetch('/api/sessions/active', { role: 'teacher' });
+        if (!response || !response.ok) return;
+        
+        const data = await response.json();
+        if (data.active) {
+          setSession(data.session);
+          setDeepLink(data.session.deep_link_url);
+          setPresentStudents(data.checkedInStudents || []);
+        } else {
+          // If session expired, don't clear the view immediately so they can see the final list,
+          // but we could update the session status locally if we wanted.
+          setSession(prev => prev ? { ...prev, status: 'EXPIRED' } : null);
+        }
+      } catch (err) {
+        console.error('Polling error:', err);
+      }
+    };
 
-    newSocket.on('connect_error', (err) => {
-      console.error('Socket connection error:', err.message);
-    });
-
-    socketRef.current = newSocket;
-    return () => newSocket.close();
+    const intervalId = setInterval(pollSession, 3000);
+    return () => clearInterval(intervalId);
   }, []);
-
-  // Dynamic Socket Room Join & Live Event Listeners
-  useEffect(() => {
-    const socket = socketRef.current;
-    if (!socket || !session?.teacher_id) return;
-
-    socket.emit('join_teacher_room', session.teacher_id);
-
-    const handleSessionStarted = (data) => {
-      setSession(data.session);
-      setDeepLink(data.deepLinkUrl);
-    };
-
-    const handleSessionExtended = (data) => {
-      setSession((prev) => ({ ...prev, expires_at: data.newExpiresAt }));
-    };
-
-    const handleAttendanceRecorded = (data) => {
-      setPresentStudents((prev) => {
-        if (prev.find(s => s.id === data.student_id)) return prev;
-        return [...prev, { id: data.student_id, name: data.name }];
-      });
-    };
-
-    socket.on('session_started', handleSessionStarted);
-    socket.on('session_extended', handleSessionExtended);
-    socket.on('attendance_recorded', handleAttendanceRecorded);
-
-    return () => {
-      socket.off('session_started', handleSessionStarted);
-      socket.off('session_extended', handleSessionExtended);
-      socket.off('attendance_recorded', handleAttendanceRecorded);
-    };
-  }, [session?.teacher_id]);
 
   const handleStartAttendance = async () => {
     setError('');

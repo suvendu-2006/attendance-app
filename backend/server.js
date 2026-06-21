@@ -65,23 +65,70 @@ const authLimiter = rateLimit({
   message: { error: 'Too many login attempts. Please try again later.' },
 });
 
-// Check-in limiter: 5 per minute per IP (student clicking retry frantically).
-// For a real 30-student stampede, each gets 5 — more than enough for 1 real + 4 retries.
+// Check-in limiter: 10 per minute per STUDENT (keyed by JWT identity, not IP).
+// On campus NAT, all students share one public IP, so IP-keying blocks everyone after 5.
+// jwt.decode (no verification) is safe here — the real auth middleware verifies later.
 const checkInLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 5,
+  max: 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many check-in attempts. Please wait a minute.' },
+  keyGenerator: (req) => {
+    // Try student cookie first, then Authorization header
+    let token = null;
+    if (req.cookies?.student_auth_token) {
+      token = req.cookies.student_auth_token;
+    } else if (req.cookies?.auth_token) {
+      token = req.cookies.auth_token;
+    } else {
+      const authHeader = req.headers['authorization'];
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.slice(7);
+      }
+    }
+    if (token) {
+      try {
+        const decoded = jwt.decode(token);
+        if (decoded?.id) return `student:${decoded.id}`;
+      } catch {
+        // Fall through to IP
+      }
+    }
+    return req.ip; // Unauthenticated spam still throttled by IP
+  },
 });
 
-// Device registration: same as login (credential-gated)
+// Device registration: keyed by student identity (same logic as check-in).
+// register-device is a POST behind requireStudent, so the student JWT is available.
 const registerDeviceLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many device registration attempts. Please try again later.' },
+  keyGenerator: (req) => {
+    let token = null;
+    if (req.cookies?.student_auth_token) {
+      token = req.cookies.student_auth_token;
+    } else if (req.cookies?.auth_token) {
+      token = req.cookies.auth_token;
+    } else {
+      const authHeader = req.headers['authorization'];
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.slice(7);
+      }
+    }
+    if (token) {
+      try {
+        const decoded = jwt.decode(token);
+        if (decoded?.id) return `device:${decoded.id}`;
+      } catch {
+        // Fall through to IP
+      }
+    }
+    return req.ip;
+  },
 });
 
 app.use(cors(corsOptions));

@@ -339,9 +339,9 @@ router.post('/teacher/reset-device-limit', requireTeacher, requireAdmin, async (
 
 router.post('/logout', (req, res) => {
   // Revoke the token server-side (DB-backed — survives restart, shared across instances)
-  const token = extractToken(req);  // try all cookie names + header
+  // Try BOTH role-specific cookies since we don't know if a teacher or student is logging out.
+  const token = extractToken(req, 'teacher') || extractToken(req, 'student');
   if (token) {
-    // Decode just enough to get the exp claim (don't verify — expired tokens are harmless to store)
     try {
       const decoded = jwt.decode(token);
       if (decoded && decoded.exp) {

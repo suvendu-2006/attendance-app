@@ -35,8 +35,11 @@ CREATE TABLE IF NOT EXISTS nonces (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     session_id UUID REFERENCES sessions(id) ON DELETE CASCADE,
     nonce_value VARCHAR(255) NOT NULL,
+    student_id UUID REFERENCES students(id) ON DELETE CASCADE,
+    used_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(session_id, nonce_value)
+    expires_at TIMESTAMP WITH TIME ZONE,
+    UNIQUE(session_id, student_id, nonce_value)
 );
 
 -- 5. Devices

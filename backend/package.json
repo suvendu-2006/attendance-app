@@ -5,7 +5,10 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "test": "node test_integration.js"
+    "test": "node test_integration.js",
+    "migrate": "node migrate.js",
+    "migrate:all": "psql \"$DATABASE_URL\" -f schema.sql && node migrate.js && psql \"$DATABASE_URL\" -f migrations_fixes.sql && psql \"$DATABASE_URL\" -f migrations_remaining.sql && psql \"$DATABASE_URL\" -f migrations_drop_old_nonce_constraints.sql",
+    "seed": "node seed.js"
   },
   "dependencies": {
     "@google-cloud/cloud-sql-connector": "^1.4.1",

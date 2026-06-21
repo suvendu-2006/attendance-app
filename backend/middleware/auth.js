@@ -68,16 +68,25 @@ async function revokeToken(token, decodedExp) {
 // -------------------------------------------------------------------------
 
 function extractToken(req, role) {
-  // Try role-specific cookie first
-  const cookieName = role ? TOKEN_COOKIE_NAMES[role] : null;
-  if (cookieName && req.cookies && req.cookies[cookieName]) {
-    return req.cookies[cookieName];
+  if (req.cookies) {
+    if (role) {
+      // Role-specific cookie (known role)
+      const cookieName = TOKEN_COOKIE_NAMES[role];
+      if (cookieName && req.cookies[cookieName]) {
+        return req.cookies[cookieName];
+      }
+    } else {
+      // No role specified (requireAuth / /me) — try both role cookies
+      for (const name of Object.values(TOKEN_COOKIE_NAMES)) {
+        if (req.cookies[name]) return req.cookies[name];
+      }
+    }
+    // Legacy fallback
+    if (req.cookies.auth_token) {
+      return req.cookies.auth_token;
+    }
   }
-  // Fallback: generic auth_token (legacy support — e.g. during migration)
-  if (req.cookies && req.cookies.auth_token) {
-    return req.cookies.auth_token;
-  }
-  // Fallback: Authorization header (API clients, tests, socket.io)
+  // Fallback: Authorization header (API clients, tests)
   const authHeader = req.headers['authorization'];
   return authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
 }

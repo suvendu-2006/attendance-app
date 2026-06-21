@@ -5,8 +5,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "test": "node test_integration.js",
-    "test:realtime": "node test_realtime.js"
+    "test": "node test_integration.js"
   },
   "dependencies": {
     "@google-cloud/cloud-sql-connector": "^1.4.1",
@@ -20,10 +19,6 @@
     "helmet": "^8.2.0",
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.11.0",
-    "pg": "^8.11.3",
-    "socket.io": "^4.8.3"
-  },
-  "devDependencies": {
-    "socket.io-client": "^4.8.3"
+    "pg": "^8.11.3"
   }
 }

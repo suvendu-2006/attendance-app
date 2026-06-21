@@ -73,6 +73,10 @@ const checkInLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  // validate: false suppresses ERR_ERL_KEY_GEN_IPV6 — our keyGenerator returns
+  // identity strings ("student:<uuid>") for authenticated requests, not raw IPs.
+  // req.ip is only the fallback for unauthenticated spam.
+  validate: false,
   message: { error: 'Too many check-in attempts. Please wait a minute.' },
   keyGenerator: (req) => {
     // Try student cookie first, then Authorization header
@@ -106,6 +110,7 @@ const registerDeviceLimiter = rateLimit({
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: false,
   message: { error: 'Too many device registration attempts. Please try again later.' },
   keyGenerator: (req) => {
     let token = null;
@@ -180,47 +185,98 @@ const healthHandler = async (req, res) => {
 app.get('/health', healthHandler);
 app.get('/api/health', healthHandler);
 
-setInterval(async () => {
-  try {
-    // Use a CTE with FOR UPDATE SKIP LOCKED to avoid clobbering concurrent extend operations
-    await pool.query(
-      `WITH expired AS (
-         SELECT id FROM sessions
-         WHERE status = 'ACTIVE' AND expires_at < NOW()
-         FOR UPDATE SKIP LOCKED
-       )
-       UPDATE sessions SET status = 'EXPIRED'
-       WHERE id IN (SELECT id FROM expired)`
-    );
-  } catch (err) {
-    console.error('Session expiry sweep failed:', err);
-  }
-}, 60 * 1000);
+// -------------------------------------------------------------------------
+// Cleanup jobs — extract into reusable functions for both local + cron use
+// -------------------------------------------------------------------------
 
-setInterval(async () => {
-  try {
-    await pool.query('DELETE FROM nonces WHERE expires_at IS NOT NULL AND expires_at < NOW()');
-  } catch (err) {
-    console.error('Nonce cleanup failed:', err);
-  }
-}, 10 * 60 * 1000);
+async function expireSessions() {
+  await pool.query(
+    `WITH expired AS (
+       SELECT id FROM sessions
+       WHERE status = 'ACTIVE' AND expires_at < NOW()
+       FOR UPDATE SKIP LOCKED
+     )
+     UPDATE sessions SET status = 'EXPIRED'
+     WHERE id IN (SELECT id FROM expired)`
+  );
+}
 
-// Clean up expired revoked tokens (they're useless once the JWT itself expired)
-setInterval(async () => {
-  try {
-    await pool.query('DELETE FROM revoked_tokens WHERE expires_at < NOW()');
-  } catch (err) {
-    console.error('Revoked-token cleanup failed:', err);
+async function cleanupNonces() {
+  await pool.query('DELETE FROM nonces WHERE expires_at IS NOT NULL AND expires_at < NOW()');
+}
+
+async function cleanupRevokedTokens() {
+  await pool.query('DELETE FROM revoked_tokens WHERE expires_at < NOW()');
+}
+
+// -------------------------------------------------------------------------
+// Vercel Cron endpoint — called by vercel.json crons config
+// Protected by CRON_SECRET to prevent external abuse.
+// -------------------------------------------------------------------------
+
+app.get('/api/cron/cleanup', async (req, res) => {
+  // Vercel sets Authorization: Bearer <CRON_SECRET> on cron invocations.
+  // Also accept a query param for manual testing.
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret) {
+    const authHeader = req.headers['authorization'];
+    const headerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    if (headerToken !== cronSecret) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
   }
-}, 30 * 60 * 1000);
+
+  const results = {};
+  try {
+    await expireSessions();
+    results.sessions = 'ok';
+  } catch (err) {
+    results.sessions = err.message;
+  }
+  try {
+    await cleanupNonces();
+    results.nonces = 'ok';
+  } catch (err) {
+    results.nonces = err.message;
+  }
+  try {
+    await cleanupRevokedTokens();
+    results.revokedTokens = 'ok';
+  } catch (err) {
+    results.revokedTokens = err.message;
+  }
+
+  res.json({ status: 'done', results });
+});
+
+// -------------------------------------------------------------------------
+// Local server: setInterval jobs + SIGTERM handling
+// Vercel: export app as serverless handler
+// -------------------------------------------------------------------------
 
 const PORT = process.env.PORT || 5000;
 
 if (process.env.VERCEL) {
   // Export the Express API for Vercel Serverless
+  // setInterval jobs don't run here — use /api/cron/cleanup via Vercel Cron
   module.exports = app;
 } else {
-  // Standalone server for local development
+  // Standalone server for local development — run cleanup on intervals
+  setInterval(async () => {
+    try { await expireSessions(); }
+    catch (err) { console.error('Session expiry sweep failed:', err); }
+  }, 60 * 1000);
+
+  setInterval(async () => {
+    try { await cleanupNonces(); }
+    catch (err) { console.error('Nonce cleanup failed:', err); }
+  }, 10 * 60 * 1000);
+
+  setInterval(async () => {
+    try { await cleanupRevokedTokens(); }
+    catch (err) { console.error('Revoked-token cleanup failed:', err); }
+  }, 30 * 60 * 1000);
+
   const server = http.createServer(app);
   server.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
 
@@ -239,3 +295,4 @@ if (process.env.VERCEL) {
   });
   process.on('SIGINT', () => process.emit('SIGTERM'));
 }
+

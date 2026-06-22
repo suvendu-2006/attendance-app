@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Play, Share2, Clock, CheckCircle2, LogOut, Copy, Trash2, Users, ShieldAlert } from 'lucide-react';
+import { Play, Share2, Clock, CheckCircle2, LogOut, Copy, Trash2, Users, ShieldAlert, WifiOff, AlertTriangle } from 'lucide-react';
 import { BACKEND_URL, apiFetch, storage } from '../utils/api';
 
 const TeacherDashboard = () => {
@@ -12,6 +12,12 @@ const TeacherDashboard = () => {
   const [isAdmin, setIsAdmin] = useState(false);
   const [allStudents, setAllStudents] = useState([]);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState('connected');
+  const failureCount = useRef(0);
+  const [sessionExpiring, setSessionExpiring] = useState(false);
+  const [flags, setFlags] = useState([]);
+  const [guestRequests, setGuestRequests] = useState([]);
+  const [guestConfirmNames, setGuestConfirmNames] = useState({});
   const navigate = useNavigate();
 
   const teacherId = storage.getTeacherId();
@@ -44,6 +50,18 @@ const TeacherDashboard = () => {
           if (data.user?.is_admin) {
             setIsAdmin(true);
           }
+          if (data.iat || data.token_iat) {
+            const iat = data.iat || data.token_iat;
+            if (Date.now()/1000 - iat > 7 * 60 * 60) setSessionExpiring(true);
+          } else {
+            const token = storage.getTeacherToken();
+            if (token && token.length > 20 && token.includes('.')) {
+              try {
+                const payload = JSON.parse(atob(token.split('.')[1]));
+                if (Date.now()/1000 - payload.iat > 7 * 60 * 60) setSessionExpiring(true);
+              } catch (e) {}
+            }
+          }
         }
       } catch (err) {
         console.error('Failed to fetch user status:', err);
@@ -64,11 +82,27 @@ const TeacherDashboard = () => {
     }
   };
 
+  const fetchFlags = async () => {
+    try {
+      const res = await apiFetch('/api/auth/admin/flags', { role: 'teacher' });
+      if (res.ok) {
+        const data = await res.json();
+        setFlags(data.flags || []);
+      }
+    } catch (err) {}
+  };
+
   useEffect(() => {
     if (isAdmin && showAdminPanel) {
       fetchStudents();
+      fetchFlags();
     }
   }, [isAdmin, showAdminPanel]);
+
+  const renewSession = async () => {
+    await apiFetch('/api/auth/me', { role: 'teacher' });
+    setSessionExpiring(false);
+  };
 
   const handleSoftDelete = async (studentId) => {
     if (!window.confirm("Are you sure you want to soft-delete this student?")) return;
@@ -103,6 +137,7 @@ const TeacherDashboard = () => {
             setSession(data.session);
             setDeepLink(data.session.deep_link_url);
             setPresentStudents(data.checkedInStudents || []);
+            setGuestRequests(data.guestRequests || []);
           }
         }
       } catch (err) {
@@ -120,13 +155,21 @@ const TeacherDashboard = () => {
     const pollSession = async () => {
       try {
         const response = await apiFetch('/api/sessions/active', { role: 'teacher' });
-        if (!response || !response.ok) return;
+        if (!response || !response.ok) {
+          failureCount.current += 1;
+          if (failureCount.current >= 2) setConnectionStatus('disconnected');
+          return;
+        }
+        
+        failureCount.current = 0;
+        if (connectionStatus === 'disconnected') setConnectionStatus('connected');
         
         const data = await response.json();
         if (data.active) {
           setSession(data.session);
           setDeepLink(data.session.deep_link_url);
           setPresentStudents(data.checkedInStudents || []);
+          setGuestRequests(data.guestRequests || []);
         } else {
           // If session expired, don't clear the view immediately so they can see the final list,
           // but we could update the session status locally if we wanted.
@@ -134,12 +177,39 @@ const TeacherDashboard = () => {
         }
       } catch (err) {
         console.error('Polling error:', err);
+        failureCount.current += 1;
+        if (failureCount.current >= 2) setConnectionStatus('disconnected');
       }
     };
 
     const intervalId = setInterval(pollSession, 3000);
     return () => clearInterval(intervalId);
-  }, []);
+  }, [connectionStatus]);
+
+  const handleApproveGuest = async (reqId) => {
+    const confirmName = guestConfirmNames[reqId] || '';
+    if (!confirmName.trim()) {
+      setError("Please type the student's name to approve.");
+      return;
+    }
+    setError('');
+    try {
+      const response = await apiFetch('/api/overrides/approve-guest', {
+        role: 'teacher',
+        method: 'POST',
+        body: { request_id: reqId, confirm_name: confirmName }
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setError(data.error || 'Failed to approve guest');
+      } else {
+        setGuestRequests(prev => prev.filter(r => r.id !== reqId));
+        setGuestConfirmNames(prev => { const n = {...prev}; delete n[reqId]; return n; });
+      }
+    } catch (err) {
+      setError('Network error. Could not approve guest.');
+    }
+  };
 
   const handleStartAttendance = async () => {
     setError('');
@@ -188,13 +258,24 @@ const TeacherDashboard = () => {
   };
 
   const handleShareToWhatsApp = () => {
-    const text = encodeURIComponent(`AI/ML Attendance is open! Tap to mark present. Window closes in 90 seconds.\n\n${deepLink}`);
+    const text = encodeURIComponent(`AI/ML Attendance is open! Tap to mark present. Window closes in 5 minutes.\n\n${deepLink}`);
     window.location.href = `https://wa.me/?text=${text}`;
   };
 
   return (
-    <div className="page-container">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+    <>
+      {sessionExpiring && (
+        <div onClick={renewSession} style={{ background: '#f59e0b', color: 'white', padding: '12px', textAlign: 'center', cursor: 'pointer', fontWeight: 'bold', width: '100%', position: 'absolute', top: 0, left: 0, zIndex: 1000 }}>
+          Session expiring soon — click to renew
+        </div>
+      )}
+      {connectionStatus === 'disconnected' && (
+        <div style={{ position: 'fixed', bottom: '20px', right: '20px', background: 'var(--danger)', color: 'white', padding: '10px 20px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px', zIndex: 1000, boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+          <WifiOff size={16} /> Connection lost — retrying...
+        </div>
+      )}
+      <div className="page-container" style={{ paddingTop: sessionExpiring ? '60px' : '20px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
         <h1 style={{ fontSize: '28px', fontWeight: 'bold' }}>Teacher Dashboard</h1>
         <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
           {session && (
@@ -261,6 +342,37 @@ const TeacherDashboard = () => {
                         >
                           <Trash2 size={14} /> Soft Delete
                         </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <h2 style={{ marginTop: '30px', marginBottom: '16px', fontSize: '20px', display: 'flex', alignItems: 'center', gap: '8px', color: '#f59e0b' }}>
+            <AlertTriangle size={24} />
+            Security Flags
+          </h2>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--surface-border)' }}>
+                  <th style={{ padding: '12px 8px', color: 'var(--text-secondary)' }}>Student</th>
+                  <th style={{ padding: '12px 8px', color: 'var(--text-secondary)' }}>Reason</th>
+                  <th style={{ padding: '12px 8px', color: 'var(--text-secondary)' }}>GPS Coordinates</th>
+                </tr>
+              </thead>
+              <tbody>
+                {flags.length === 0 ? (
+                  <tr><td colSpan="3" style={{ padding: '20px', textAlign: 'center', color: 'var(--text-secondary)' }}>No security flags found.</td></tr>
+                ) : (
+                  flags.map(flag => (
+                    <tr key={flag.id} style={{ borderBottom: '1px solid var(--surface-border)' }}>
+                      <td style={{ padding: '12px 8px', fontWeight: '500' }}>{flag.student_name}</td>
+                      <td style={{ padding: '12px 8px' }}>{flag.reason_code}</td>
+                      <td style={{ padding: '12px 8px' }}>
+                        {flag.gps_lat ? `${parseFloat(flag.gps_lat).toFixed(4)}, ${parseFloat(flag.gps_lng).toFixed(4)}` : 'N/A'}
                       </td>
                     </tr>
                   ))
@@ -347,9 +459,51 @@ const TeacherDashboard = () => {
               </ul>
             )}
           </div>
+
+          <div className="card" aria-live="polite" style={{ marginTop: '20px', border: '1px solid var(--surface-border)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2 style={{ fontSize: '20px' }}>Guest Requests</h2>
+              <span role="status" style={{ backgroundColor: '#f59e0b', color: 'white', padding: '4px 12px', borderRadius: '12px', fontWeight: 'bold' }}>
+                {guestRequests.length}
+              </span>
+            </div>
+            {guestRequests.length === 0 ? (
+              <p style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: '20px 0' }}>No pending guest requests.</p>
+            ) : (
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                {guestRequests.map((req) => (
+                  <li key={req.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px 0', borderBottom: '1px solid var(--surface-border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                      <span style={{ fontSize: '16px', fontWeight: '500' }}>{req.student_name}</span>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <input 
+                          type="text" 
+                          placeholder="Type student name" 
+                          value={guestConfirmNames[req.id] || ''}
+                          onChange={(e) => setGuestConfirmNames({...guestConfirmNames, [req.id]: e.target.value})}
+                          style={{ padding: '6px 10px', borderRadius: '4px', border: '1px solid var(--surface-border)', backgroundColor: 'var(--background)', color: 'white', outline: 'none' }}
+                        />
+                        <button 
+                          onClick={() => handleApproveGuest(req.id)}
+                          style={{ padding: '6px 12px', borderRadius: '4px', border: 'none', backgroundColor: 'var(--success)', color: 'white', cursor: 'pointer', fontWeight: 'bold' }}
+                        >Approve</button>
+                      </div>
+                    </div>
+                    {(req.gps_lat || req.reason) && (
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', gap: '16px', marginTop: '4px' }}>
+                        {req.gps_lat && <span>GPS: {parseFloat(req.gps_lat).toFixed(4)}, {parseFloat(req.gps_lng).toFixed(4)}</span>}
+                        {req.reason && <span>Reason: {req.reason}</span>}
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </>
       )}
     </div>
+    </>
   );
 };
 

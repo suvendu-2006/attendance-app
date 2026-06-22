@@ -1,10 +1,4 @@
-// Shared API helpers. (Issues 5, 6, 23, 44)
-// Fix 2: cookies are now role-scoped (teacher_auth_token / student_auth_token),
-// so the frontend no longer stores raw tokens — only boolean flags for routing.
-// The actual auth is in HTTP-only cookies set by the server.
-
-export const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
-
+export const BACKEND_URL = '';
 const TEACHER_KEY = 'is_teacher_authed';
 const STUDENT_KEY = 'is_student_authed';
 const TEACHER_ID_KEY = 'teacher_id';

@@ -3,8 +3,22 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 function buildConfig() {
-  if (process.env.DATABASE_URL) {
-    return { connectionString: process.env.DATABASE_URL };
+  let dbUrl = process.env.POSTGRES_URL || process.env.DATABASE_URL;
+  if (dbUrl) {
+    const isLocal = dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1');
+    // pg-connection-string overrides our SSL object if sslmode is in the URL. Strip it out safely.
+    try {
+      const parsedUrl = new URL(dbUrl);
+      parsedUrl.searchParams.delete('sslmode');
+      dbUrl = parsedUrl.toString();
+    } catch (e) {
+      // fallback if URL parsing fails
+    }
+    
+    return { 
+      connectionString: dbUrl,
+      ssl: isLocal ? false : { rejectUnauthorized: false }
+    };
   }
   return {
     user: process.env.DB_USER,

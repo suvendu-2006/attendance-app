@@ -11,7 +11,7 @@ router.post('/start', requireTeacher, async (req, res) => {
   try {
     const teacherId = req.user.id;
     const now = Date.now();
-    const sessionIdDuration = 90 * 1000;
+    const sessionIdDuration = 5 * 60 * 1000; // 5 minutes
 
     await client.query('BEGIN');
 
@@ -69,11 +69,11 @@ router.post('/extend', requireTeacher, async (req, res) => {
       return res.status(400).json({ error: 'Session is no longer active and cannot be extended' });
     }
 
-    const newExpiresAt = new Date(new Date(session.expires_at).getTime() + 30 * 1000);
+    const newExpiresAt = new Date(new Date(session.expires_at).getTime() + 60 * 1000);
     await pool.query('UPDATE sessions SET expires_at = $1 WHERE id = $2', [newExpiresAt, session_id]);
 
 
-    res.json({ message: 'Session extended by 30 seconds', newExpiresAt: newExpiresAt.toISOString() });
+    res.json({ message: 'Session extended by 60 seconds', newExpiresAt: newExpiresAt.toISOString() });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });

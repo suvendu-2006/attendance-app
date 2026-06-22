@@ -2,8 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { storage } from '../utils/api';
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
-if (!BACKEND_URL) console.error('VITE_BACKEND_URL environment variable is not set!');
+const BACKEND_URL = '';
 
 export default function Login() {
   const [phoneNumber, setPhoneNumber] = useState('');

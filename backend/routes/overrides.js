@@ -10,7 +10,7 @@ async function notifyAttendance(req, teacherId, studentId) {
 
 router.post('/guest-request', requireStudent, async (req, res) => {
   try {
-    const { session_id } = req.body;
+    const { session_id, gps_lat, gps_lng, reason } = req.body;
     const student_id = req.user.id;
     if (!session_id || typeof session_id !== 'string') {
       return res.status(400).json({ error: 'Invalid or missing session_id' });
@@ -25,13 +25,25 @@ router.post('/guest-request', requireStudent, async (req, res) => {
       return res.status(403).json({ error: 'Session is no longer active. Guest requests cannot be submitted.' });
     }
 
-    await pool.query(
-      `INSERT INTO guest_requests (student_id, session_id, status)
-       VALUES ($1, $2, 'PENDING')
-       ON CONFLICT DO NOTHING`,
-      [student_id, session_id]
+    // Rate limit: max 3 guest requests per student per week
+    const { rows: recentRequests } = await pool.query(
+      `SELECT COUNT(*) as cnt FROM guest_requests WHERE student_id = $1 AND created_at > NOW() - INTERVAL '7 days'`,
+      [student_id]
     );
+    if (parseInt(recentRequests[0].cnt) >= 3) {
+      return res.status(429).json({ error: 'Maximum 3 guest requests per week. Contact your teacher directly.' });
+    }
 
+    // Parse optional GPS coordinates
+    const lat = gps_lat != null ? parseFloat(gps_lat) : null;
+    const lng = gps_lng != null ? parseFloat(gps_lng) : null;
+
+    await pool.query(
+      `INSERT INTO guest_requests (student_id, session_id, status, gps_lat, gps_lng, reason)
+       VALUES ($1, $2, 'PENDING', $3, $4, $5)
+       ON CONFLICT DO NOTHING`,
+      [student_id, session_id, lat, lng, reason || null]
+    );
 
     res.json({ message: 'Guest request sent to teacher.' });
   } catch (err) {
@@ -43,9 +55,13 @@ router.post('/guest-request', requireStudent, async (req, res) => {
 router.post('/approve-guest', requireTeacher, async (req, res) => {
   const client = await pool.getClient();
   try {
-    const { request_id } = req.body;
+    const { request_id, confirm_name } = req.body;
     if (!request_id || typeof request_id !== 'string') {
       return res.status(400).json({ error: 'Invalid or missing request_id' });
+    }
+    // Friction: teacher must type the student's name to confirm
+    if (!confirm_name || typeof confirm_name !== 'string' || confirm_name.trim().length === 0) {
+      return res.status(400).json({ error: 'You must type the student\'s name to confirm approval (confirm_name field).' });
     }
 
     await client.query('BEGIN');
@@ -68,6 +84,14 @@ router.post('/approve-guest', requireTeacher, async (req, res) => {
     if (reqRow.status !== 'PENDING') {
       await client.query('ROLLBACK');
       return res.json({ message: 'Request already processed.' });
+    }
+
+    // Verify the typed name matches the actual student name (case-insensitive)
+    const { rows: studentRows } = await client.query('SELECT name FROM students WHERE id = $1', [reqRow.student_id]);
+    const studentName = studentRows[0]?.name || '';
+    if (studentName.toLowerCase().trim() !== confirm_name.toLowerCase().trim()) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Student name does not match. Please type the correct name.' });
     }
 
     await client.query(
@@ -123,14 +147,14 @@ router.post('/manual-override', requireTeacher, async (req, res) => {
 
     const now = new Date();
     const expiresAt = new Date(session.expires_at);
-    const windowEnd = new Date(expiresAt.getTime() + 5 * 60 * 1000);
+    const windowEnd = new Date(expiresAt.getTime() + 30 * 60 * 1000); // 30-minute override window
     if (now < expiresAt) {
       await client.query('ROLLBACK');
       return res.status(403).json({ error: 'Manual override is available only after the session ends.' });
     }
     if (now > windowEnd) {
       await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'Manual override window (5 mins) has closed.' });
+      return res.status(403).json({ error: 'Manual override window (30 minutes) has closed.' });
     }
 
     const insert = await client.query(

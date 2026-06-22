@@ -10,6 +10,19 @@ const path = require('path');
 const cookie = require('cookie');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
+// Map Vercel/Supabase env vars to our expected env vars and trim whitespace/newlines
+process.env.DB_PASSWORD = (process.env.DB_PASSWORD || process.env.POSTGRES_PASSWORD || '').trim();
+process.env.JWT_SECRET = (process.env.JWT_SECRET || process.env.SUPABASE_JWT_SECRET || '').trim();
+process.env.CAMPUS_LAT = (process.env.CAMPUS_LAT || '12.9716').trim();
+process.env.CAMPUS_LNG = (process.env.CAMPUS_LNG || '77.5946').trim();
+process.env.HMAC_SECRET = (process.env.HMAC_SECRET || 'b8375e2a1b94c30b201a0521d8b94f6c49e1a8a25d2c679a78f2479e120f283b').trim();
+if (process.env.FRONTEND_URL) process.env.FRONTEND_URL = process.env.FRONTEND_URL.trim();
+
+// Warn if campus coordinates are still set to the Bangalore placeholder
+if (process.env.CAMPUS_LAT === '12.9716' && process.env.CAMPUS_LNG === '77.5946') {
+  console.warn('⚠️  WARNING: CAMPUS_LAT/LNG is set to Bangalore placeholder (12.9716, 77.5946). Set real campus coordinates in environment variables.');
+}
+
 const pool = require('./db');
 const authRoutes = require('./routes/auth');
 const sessionRoutes = require('./routes/sessions');
@@ -43,14 +56,19 @@ app.use(helmet({
   },
 }));
 
-const allowedOrigins = process.env.NODE_ENV === 'production'
-  ? [process.env.FRONTEND_URL].filter(Boolean)
-  : ['http://localhost:5173', 'http://localhost:5174'];
-
 const corsOptions = {
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) callback(null, true);
-    else callback(new Error('CORS: origin not allowed'));
+    if (!origin) return callback(null, true);
+    
+    // Allow local development ports
+    if (origin.startsWith('http://localhost:')) return callback(null, true);
+    
+    // Allow Vercel deployments and the explicit FRONTEND_URL
+    if (origin.endsWith('.vercel.app') || origin === process.env.FRONTEND_URL) {
+      return callback(null, true);
+    }
+    
+    callback(null, false);
   },
   credentials: true,
 };
@@ -216,14 +234,15 @@ async function cleanupRevokedTokens() {
 
 app.get('/api/cron/cleanup', async (req, res) => {
   // Vercel sets Authorization: Bearer <CRON_SECRET> on cron invocations.
-  // Also accept a query param for manual testing.
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = req.headers['authorization'];
-    const headerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
-    if (headerToken !== cronSecret) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+  if (!cronSecret) {
+    console.error('FATAL: CRON_SECRET environment variable is not set.');
+    return res.status(500).json({ error: 'CRON_SECRET not configured' });
+  }
+  const authHeader = req.headers['authorization'];
+  const headerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (headerToken !== cronSecret) {
+    return res.status(401).json({ error: 'Unauthorized' });
   }
 
   const results = {};

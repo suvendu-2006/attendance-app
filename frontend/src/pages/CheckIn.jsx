@@ -55,6 +55,9 @@ const CheckIn = () => {
         clearTimeout(timeout);
 
         const contentType = res.headers.get('content-type');
+        if (contentType && contentType.includes('text/html')) {
+          setStatus('error'); setMessage('You may need to log in to campus WiFi first.'); return;
+        }
         if (!contentType || !contentType.includes('application/json')) {
           setStatus('error'); setMessage('Server returned an unexpected response.'); return;
         }
@@ -68,8 +71,13 @@ const CheckIn = () => {
         else { setStatus('error'); setMessage(data.message || data.error || 'Failed to mark attendance.'); }
       } catch (err) {
         clearTimeout(timeout);
-        if (err.name === 'AbortError') { setStatus('error'); setMessage('Request timed out. Tap retry.'); }
-        else { setStatus('error'); setMessage('A network error occurred. Tap retry.'); }
+        if (err.name === 'SyntaxError' || (err.message && err.message.includes('JSON'))) {
+          setStatus('error'); setMessage('You may need to log in to campus WiFi first.');
+        } else if (err.name === 'AbortError' || err.message === 'Failed to fetch' || err.message === 'Load failed') {
+          setStatus('network-error');
+        } else {
+          setStatus('network-error');
+        }
       }
     };
     run();
@@ -104,6 +112,13 @@ const CheckIn = () => {
             <h2 style={{ marginBottom: '10px', color: 'var(--danger)' }}>{status === 'gps-error' ? 'Location Needed' : 'Access Denied'}</h2>
             <p style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>{message}</p>
             <button onClick={retry} style={{ padding: '0.6rem 1.2rem', borderRadius: '0.5rem', border: 'none', background: '#3b82f6', color: 'white', fontSize: '1rem', cursor: 'pointer' }}>Retry</button>
+          </>
+        )}
+        {status === 'network-error' && (
+          <>
+            <XCircle size={64} color="var(--warning)" style={{ margin: '0 auto 20px' }} />
+            <h2 style={{ marginBottom: '16px', color: 'var(--warning)' }}>Network Error</h2>
+            <button onClick={retry} style={{ padding: '0.6rem 1.2rem', borderRadius: '0.5rem', border: 'none', background: '#3b82f6', color: 'white', fontSize: '1rem', cursor: 'pointer' }}>Connection failed — tap to retry</button>
           </>
         )}
       </div>

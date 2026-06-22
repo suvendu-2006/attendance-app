@@ -135,7 +135,7 @@ router.post('/check-in', requireStudent, deviceMiddleware, async (req, res) => {
 
     const CAMPUS_LAT = session.campus_lat != null ? parseFloat(session.campus_lat) : parseFloat(process.env.CAMPUS_LAT);
     const CAMPUS_LNG = session.campus_lng != null ? parseFloat(session.campus_lng) : parseFloat(process.env.CAMPUS_LNG);
-    const MAX_DIST = 300;
+    const MAX_DIST = 500; // 500m to account for indoor GPS inaccuracy (50-200m)
     const dist = haversineDistance(lat, lng, CAMPUS_LAT, CAMPUS_LNG);
     if (dist > MAX_DIST) {
       await logFlag(student_id, session_id, 'GPS_FAIL', lat, lng, ipAddress);

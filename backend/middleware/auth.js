@@ -124,6 +124,21 @@ function requireTeacher(req, res, next) {
   decode(req, res, 'teacher').then(({ decoded, error }) => {
     if (error) return error;
     req.user = decoded;
+
+    // Sliding renewal: if token is older than 4 hours (half of 8h), issue a new one
+    const nowSecs = Math.floor(Date.now() / 1000);
+    if (nowSecs - decoded.iat > 4 * 60 * 60) {
+      const newToken = jwt.sign({ id: decoded.id, role: 'teacher' }, process.env.JWT_SECRET, { expiresIn: '8h' });
+      res.cookie(TOKEN_COOKIE_NAMES['teacher'], newToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        maxAge: 8 * 60 * 60 * 1000,
+      });
+      // Optionally signal frontend that token refreshed
+      res.setHeader('X-Token-Refreshed', 'true');
+    }
+
     next();
   });
 }

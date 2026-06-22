@@ -161,11 +161,11 @@ router.post('/student/register-device', async (req, res) => {
     const device = deviceRows[0];
 
     if (device && device.last_reset_at) {
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      if (new Date(device.last_reset_at) > thirtyDaysAgo) {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      if (new Date(device.last_reset_at) > sevenDaysAgo) {
         return res.status(403).json({
           error: 'COOLDOWN_ACTIVE',
-          message: 'Device can only be changed once every 30 days. Ask your teacher to reset the limit.',
+          message: 'Device can only be changed once every 7 days. Ask your teacher to reset the limit.',
         });
       }
     }
@@ -217,6 +217,29 @@ router.post('/teacher/login', async (req, res) => {
 // -------------------------------------------------------------------------
 // Admin endpoints
 // -------------------------------------------------------------------------
+
+router.get('/admin/flags', requireTeacher, requireAdmin, async (req, res) => {
+  try {
+    const { student_id } = req.query;
+    let query = `
+      SELECT f.*, s.name as student_name, s.roll_number
+      FROM flags f
+      JOIN students s ON f.student_id = s.id
+    `;
+    const params = [];
+    if (student_id) {
+      query += ` WHERE f.student_id = $1`;
+      params.push(student_id);
+    }
+    query += ` ORDER BY f.created_at DESC LIMIT 100`;
+
+    const { rows } = await pool.query(query, params);
+    res.json({ flags: rows });
+  } catch (err) {
+    console.error('Error fetching flags:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 router.post('/admin/register-teacher', requireTeacher, requireAdmin, async (req, res) => {
   try {
@@ -368,12 +391,20 @@ router.get('/me', requireAuth, async (req, res) => {
         'SELECT id, name, roll_number FROM students WHERE id = $1 AND deleted_at IS NULL', [id]
       );
       if (!rows[0]) return res.status(404).json({ error: 'User not found' });
+      
+      const authToken = jwt.sign({ id: id, role: 'student' }, JWT_SECRET, { expiresIn: '2h' });
+      setAuthCookie(res, authToken, 'student');
+      
       return res.json({ authenticated: true, user: { ...rows[0], role } });
     } else if (role === 'teacher') {
       const { rows } = await pool.query(
         'SELECT id, name, phone_number, is_admin FROM teachers WHERE id = $1', [id]
       );
       if (!rows[0]) return res.status(404).json({ error: 'User not found' });
+      
+      const authToken = jwt.sign({ id: id, role: 'teacher' }, JWT_SECRET, { expiresIn: '8h' });
+      setAuthCookie(res, authToken, 'teacher');
+      
       return res.json({ authenticated: true, user: { ...rows[0], role } });
     }
   } catch (err) {

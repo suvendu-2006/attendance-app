@@ -133,6 +133,20 @@ export default function Login() {
               Student Login
             </button>
           </p>
+          <p style={{ color: '#94a3b8', fontSize: '0.875rem', marginTop: '0.5rem' }}>
+            New teacher?{' '}
+            <button
+              type="button"
+              onClick={() => navigate('/teacher-register')}
+              style={{
+                background: 'none', border: 'none', color: '#3b82f6',
+                textDecoration: 'underline', cursor: 'pointer', padding: 0,
+                fontFamily: 'inherit', fontSize: 'inherit'
+              }}
+            >
+              Register here
+            </button>
+          </p>
         </div>
       </form>
     </div>

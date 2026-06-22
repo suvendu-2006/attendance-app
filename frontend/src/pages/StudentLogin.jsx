@@ -108,6 +108,20 @@ export default function StudentLogin() {
               Teacher Login
             </button>
           </p>
+          <p style={{ color: '#94a3b8', fontSize: '0.875rem', marginTop: '0.5rem' }}>
+            First time?{' '}
+            <button
+              type="button"
+              onClick={() => navigate('/student-activate')}
+              style={{
+                background: 'none', border: 'none', color: '#3b82f6',
+                textDecoration: 'underline', cursor: 'pointer', padding: 0,
+                fontFamily: 'inherit', fontSize: 'inherit'
+              }}
+            >
+              Activate your account
+            </button>
+          </p>
         </div>
       </form>
     </div>

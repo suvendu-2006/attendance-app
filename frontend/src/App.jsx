@@ -8,6 +8,8 @@ import CheckIn from './pages/CheckIn';
 import TeacherDashboard from './pages/TeacherDashboard';
 import NotFound from './pages/NotFound';
 import StudentLogin from './pages/StudentLogin';
+import TeacherRegister from './pages/TeacherRegister';
+import StudentActivate from './pages/StudentActivate';
 import './index.css';
 
 export default function App() {
@@ -25,6 +27,8 @@ export default function App() {
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<Login />} />
         <Route path="/student-login" element={<StudentLogin />} />
+        <Route path="/student-activate" element={<StudentActivate />} />
+        <Route path="/teacher-register" element={<TeacherRegister />} />
         <Route path="/check-in" element={<CheckIn />} />
         <Route path="/teacher" element={
           <ProtectedRoute>

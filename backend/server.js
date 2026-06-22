@@ -182,9 +182,34 @@ app.use((req, res, next) => {
   next();
 });
 
+const activateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: false,
+  message: { error: 'Too many activation attempts. Please try again later.' },
+  keyGenerator: (req) => {
+    return req.body?.roll_number || req.ip;
+  },
+});
+
+const registrationLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: false,
+  message: { error: 'Too many registration attempts. Please try again later.' },
+  keyGenerator: (req) => req.ip,
+});
+
 app.use('/api/auth/student/login', authLimiter);
 app.use('/api/auth/teacher/login', authLimiter);
 app.use('/api/auth/student/register-device', registerDeviceLimiter);
+app.use('/api/auth/student/activate', activateLimiter);
+app.use('/api/auth/teacher/register', registrationLimiter);
+app.use('/api/auth/admin/generate-invite', registrationLimiter);
 app.use('/api/attendance/check-in', checkInLimiter);
 
 app.use('/api/auth', authRoutes);

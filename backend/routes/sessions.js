@@ -91,6 +91,12 @@ router.get('/active', requireTeacher, async (req, res) => {
     const session = sessionRows[0];
     if (!session) return res.json({ active: false });
 
+    // Sliding session logic: update expires_at while teacher is active
+    await pool.query(
+      `UPDATE sessions SET expires_at = NOW() + INTERVAL '90 seconds' WHERE id = $1`,
+      [session.id]
+    );
+
     const { rows: studentRows } = await pool.query(
       `SELECT s.id, s.name FROM attendance_logs a
        JOIN students s ON a.student_id = s.id

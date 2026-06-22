@@ -314,6 +314,32 @@ const TeacherDashboard = () => {
             <Users size={24} />
             Student Management (Admin)
           </h2>
+          
+          <div style={{ marginBottom: '20px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <button 
+              onClick={handleGenerateInvite}
+              className="btn-primary"
+              style={{ backgroundColor: 'var(--primary)' }}
+            >
+              Generate Teacher Invite
+            </button>
+            <div style={{ position: 'relative' }}>
+              <input 
+                type="file" 
+                accept=".csv" 
+                onChange={handleCSVUpload}
+                style={{ position: 'absolute', opacity: 0, width: '100%', height: '100%', cursor: 'pointer' }}
+                disabled={loading}
+              />
+              <button 
+                className="btn-primary"
+                style={{ backgroundColor: '#22c55e' }}
+                disabled={loading}
+              >
+                {loading ? 'Uploading...' : 'Import Students CSV'}
+              </button>
+            </div>
+          </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
               <thead>
